@@ -1,0 +1,10 @@
+{
+  "name": "@suyong/server",
+  "version": "0.2.0",
+  "private": true,
+  "description": "速用工具箱后端（FastAPI）：OCR / PDF 强力压缩 / Word ↔ PDF 互转",
+  "scripts": {
+    "dev": "cd ../../ && pnpm --filter @suyong/server _run:dev || (uvicorn app:app --reload --host 127.0.0.1 --port 8000)",
+    "_run:dev": "uvicorn app:app --reload --host 127.0.0.1 --port 8000 --app-dir server"
+  }
+}

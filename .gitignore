@@ -1,0 +1,58 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+server/.venv/
+server/.pydeps/
+server/**/__pycache__/
+*.pyc
+*.pyo
+
+# Build outputs
+dist/
+*.local
+web/dist/
+web/tsconfig.tsbuildinfo
+web/vite.config.js
+web/vite.config.d.ts
+*.tsbuildinfo
+
+# Large binaries
+ffmpeg/
+ffmpeg.zip
+gs_extract2/
+gs_installer2.exe
+libreoffice/
+
+# 大文件 / 测试文件
+server/chi_sim.traineddata
+server/test.docx
+server/test2.docx
+server/lo_test/
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+server/.env
+!.env.example
+!server/.env.example
+
+# Runtime data
+server/data/
+server/.loprofile/
+*.db
+*.db-shm
+*.db-wal
+
+# Logs
+*.log
+pnpm-debug.log*
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Misc
+`d__ai_mytools_d__ai….md

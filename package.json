@@ -1,0 +1,14 @@
+{
+  "name": "suyong-tools-root",
+  "version": "0.2.0",
+  "private": true,
+  "description": "速用工具箱 Monorepo Root - 前端web + 后端server",
+  "packageManager": "pnpm@9.4.0",
+  "scripts": {
+    "dev:web": "pnpm -F @suyong/web dev",
+    "dev:server": "pnpm -F @suyong/server dev",
+    "dev": "pnpm dev:web",
+    "build:web": "pnpm -F @suyong/web build",
+    "type-check": "pnpm -F @suyong/web type-check"
+  }
+}

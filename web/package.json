@@ -1,0 +1,43 @@
+{
+  "name": "@suyong/web",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "速用工具箱 Web 前端 (Vue3 + Vite + Element Plus + Tailwind + Pinia + PWA)",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "preview": "vite preview",
+    "type-check": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.3.1",
+    "@imgly/background-removal": "^1.5.5",
+    "@vueuse/core": "^10.11.1",
+    "element-plus": "^2.7.6",
+    "image-q": "^4.0.0",
+    "jsqr": "^1.4.0",
+    "jszip": "^3.10.1",
+    "monaco-editor": "^0.52.0",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^4.4.1",
+    "pinia": "^2.1.7",
+    "pinia-plugin-persistedstate": "^4.0.2",
+    "pptxgenjs": "^4.0.1",
+    "qrcode": "^1.5.3",
+    "vue": "^3.4.31",
+    "vue-router": "^4.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.9",
+    "@types/qrcode": "^1.5.5",
+    "@vitejs/plugin-vue": "^5.0.5",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.39",
+    "tailwindcss": "^3.4.4",
+    "typescript": "^5.4.5",
+    "vite": "^5.3.3",
+    "vite-plugin-pwa": "^0.20.0",
+    "vue-tsc": "^2.0.26"
+  }
+}
