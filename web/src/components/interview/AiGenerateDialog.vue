@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { MagicStick } from '@element-plus/icons-vue'
 import { INTERVIEW_CATEGORIES, DIFFICULTY_META, getCategoryMeta, type InterviewCategory } from '@/types/interview'
@@ -46,6 +46,20 @@ function toggle(i: number) {
   if (s.has(i)) s.delete(i)
   else s.add(i)
   checked.value = s
+}
+
+// ---------- 题目详情 ----------
+const detailVisible = ref(false)
+const detailIdx = ref(-1)
+const detailQ = computed(() => (detailIdx.value >= 0 ? preview.value[detailIdx.value] : null))
+const detailKeyPoints = computed(() => {
+  const q = detailQ.value as Record<string, unknown> | null
+  return q ? String(q.keyPoints ?? q.key_points ?? '') : ''
+})
+
+function openDetail(i: number) {
+  detailIdx.value = i
+  detailVisible.value = true
 }
 
 function selectAll(v: boolean) {
@@ -114,7 +128,7 @@ async function confirmImport() {
           全选（已选 {{ checked.size }} / {{ preview.length }}）
         </el-checkbox>
       </div>
-      <div v-for="(q, i) in preview" :key="i" class="preview-card" :class="{ checked: checked.has(i) }" @click="toggle(i)">
+      <div v-for="(q, i) in preview" :key="i" class="preview-card" :class="{ checked: checked.has(i) }" @click="openDetail(i)">
         <div class="preview-meta">
           <span class="tag-cat" :style="{ background: getCategoryMeta(String(q.category)).color }">
             {{ getCategoryMeta(String(q.category)).name }}
@@ -127,8 +141,35 @@ async function confirmImport() {
         </div>
         <h4>{{ q.title }}</h4>
         <p>{{ q.answer }}</p>
+        <span class="detail-hint">点击卡片查看详情</span>
       </div>
     </div>
+
+    <!-- 题目详情弹窗（嵌套） -->
+    <el-dialog v-model="detailVisible" title="题目详情" width="640px" top="8vh" append-to-body>
+      <div v-if="detailQ" class="detail-body">
+        <div class="preview-meta">
+          <span class="tag-cat" :style="{ background: getCategoryMeta(String(detailQ.category)).color }">
+            {{ getCategoryMeta(String(detailQ.category)).name }}
+          </span>
+          <span class="tag-diff" :style="{ color: DIFFICULTY_META[(detailQ.difficulty as keyof typeof DIFFICULTY_META)]?.color }">
+            {{ DIFFICULTY_META[(detailQ.difficulty as keyof typeof DIFFICULTY_META)]?.name ?? detailQ.difficulty }}
+          </span>
+          <span v-for="t in (detailQ.tags as string[]) || []" :key="t" class="tag">#{{ t }}</span>
+          <el-checkbox :model-value="checked.has(detailIdx)" @change="toggle(detailIdx)">勾选入库</el-checkbox>
+        </div>
+        <h3 class="detail-title">{{ detailQ.title }}</h3>
+        <h4 class="detail-label">参考答案</h4>
+        <p class="detail-text">{{ detailQ.answer || '（AI 未生成答案）' }}</p>
+        <template v-if="detailKeyPoints">
+          <h4 class="detail-label">面试核心要点</h4>
+          <p class="detail-text kp">{{ detailKeyPoints }}</p>
+        </template>
+      </div>
+      <template #footer>
+        <el-button @click="detailVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
 
     <template #footer>
       <el-button @click="visible = false">取消</el-button>
@@ -159,4 +200,17 @@ async function confirmImport() {
 .preview-meta .el-checkbox { margin-left: auto; }
 .preview-card h4 { margin: 0 0 6px; font-size: 14px; }
 .preview-card p { margin: 0; font-size: 12px; color: var(--c-text-mute); line-height: 1.6; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.detail-hint { display: block; margin-top: 6px; font-size: 11px; color: var(--c-text-mute); opacity: .7; }
+
+/* ---------- 详情弹窗 ---------- */
+.detail-body { display: flex; flex-direction: column; gap: 8px; }
+.detail-body .preview-meta { margin-bottom: 2px; }
+.detail-body .preview-meta .el-checkbox { margin-left: auto; }
+.detail-title { margin: 4px 0; font-size: 17px; line-height: 1.6; }
+.detail-label { margin: 8px 0 0; font-size: 13px; color: var(--c-primary); }
+.detail-text {
+  margin: 0; font-size: 13.5px; line-height: 1.8; white-space: pre-wrap; word-break: break-word;
+  background: var(--c-bg-soft); border-radius: 8px; padding: 10px 14px;
+}
+.detail-text.kp { background: var(--c-primary-soft); }
 </style>

@@ -716,11 +716,25 @@ def export_excel(
         groups.setdefault(q["category"], []).append(q)
 
     # 按固定分类顺序生成 sheet，未知分类追加到最后
+    # Excel sheet 名禁止 : \ / ? * [ ]，需清洗；同名自动追加序号
+    invalid_chars = re.compile(r"[:\\/?*\[\]]")
+    used_titles: set[str] = set()
+
+    def _sheet_title(name: str) -> str:
+        title = invalid_chars.sub("／", name).strip()[:31] or "Sheet"
+        base, n = title, 2
+        while title in used_titles:
+            suffix = f"_{n}"
+            title = base[: 31 - len(suffix)] + suffix
+            n += 1
+        used_titles.add(title)
+        return title
+
     ordered_cats = [c for c in _CATEGORY_ZH if c in groups] + [
         c for c in groups if c not in _CATEGORY_ZH
     ]
     for cat in ordered_cats:
-        ws = wb.create_sheet(title=_CATEGORY_ZH.get(cat, cat)[:31])
+        ws = wb.create_sheet(title=_sheet_title(_CATEGORY_ZH.get(cat, cat)))
         _write_sheet(ws, groups[cat])
 
     if not wb.sheetnames:  # 无数据时兜底，避免空工作簿保存失败

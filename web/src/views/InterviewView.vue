@@ -397,7 +397,7 @@
     </el-dialog>
 
     <!-- ============ AI 生成弹窗 ============ -->
-    <AiGenerateDialog v-model="aiVisible" @generated="onAiGenerated" />
+    <AiGenerateDialog v-model="aiVisible" @imported="onAiImported" />
   </div>
 </template>
 
@@ -421,7 +421,7 @@ import {
 } from '@/composables/useInterviewBank'
 import AiGenerateDialog from '@/components/interview/AiGenerateDialog.vue'
 
-const PAGE_SIZE = 20
+const PAGE_SIZE = 10
 
 function getDifficultyMeta(d: string) {
   return DIFFICULTY_META[d as Difficulty] ?? DIFFICULTY_META.medium
@@ -764,7 +764,9 @@ async function downloadImportTemplate() {
 
 // ---------- AI 生成 ----------
 const aiVisible = ref(false)
-function onAiGenerated() {
+/** AI 出题入库后：回到第 1 页刷新，新题按 updated_at 排序自然置顶 */
+function onAiImported() {
+  page.value = 1
   loadStats()
   loadList()
 }
