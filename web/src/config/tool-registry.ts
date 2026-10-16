@@ -30,8 +30,6 @@ const registry: Record<string, () => Promise<{ default: Component }>> = {
   'json-format': () => import('@/views/tools/JsonFormatView.vue'),
   qrcode: () => import('@/views/tools/QrcodeView.vue'),
   timestamp: () => import('@/views/tools/TimestampView.vue'),
-  'text-batch': () => import('@/views/tools/TextBatchView.vue'),
-  'markdown-editor': () => import('@/views/tools/MarkdownEditorView.vue'),
   'doc-diff': () => import('@/views/tools/DocDiffView.vue'),
   'ocr': () => import('@/views/tools/OcrView.vue'),
   'video-compress': () => import('@/views/tools/VideoCompressView.vue'),

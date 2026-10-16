@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ToolHeader from '@/components/tools/ToolHeader.vue'
-import ProcessSteps, { type StepStatus } from '@/components/common/ProcessSteps.vue'
+import ProcessSteps, { type ProcessStep, type StepStatus } from '@/components/common/ProcessSteps.vue'
 import FileDropZone from '@/components/common/FileDropZone.vue'
 import { RouterLink } from 'vue-router'
 import { usePreferenceStore } from '@/stores/preference'
@@ -42,7 +42,7 @@ const resultName = ref('')
 
 const canUseBackend = computed(() => pref.backendEnabled)
 
-const steps = computed<StepStatus[]>(() => {
+const steps = computed<ProcessStep[]>(() => {
   const s1: StepStatus = file.value ? 'done' : 'active'
   const s2: StepStatus = detecting.value ? 'active' : file.value ? 'active' : 'idle'
   const s3: StepStatus = removing.value ? 'active' : detected.value ? 'done' : 'idle'

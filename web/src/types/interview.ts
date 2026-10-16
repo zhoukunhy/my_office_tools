@@ -56,6 +56,7 @@ export interface InterviewQuestion {
   tags: string[] // 二级标签
   title: string // 题干
   answer: string // 参考答案
+  keyPoints?: string // 面试核心要点
   difficulty: Difficulty
   createdAt: number
   updatedAt: number

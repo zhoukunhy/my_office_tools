@@ -62,6 +62,25 @@ async function request(
   }
 }
 
+/** 后端返回 snake_case 字段，统一归一化为前端 camelCase */
+function normalizeQuestion(raw: Record<string, unknown>): InterviewQuestion {
+  const r = raw as Record<string, unknown>
+  return {
+    ...(raw as unknown as InterviewQuestion),
+    id: String(r.id ?? ''),
+    category: (r.category ?? 'other') as InterviewQuestion['category'],
+    tags: Array.isArray(r.tags) ? (r.tags as string[]) : [],
+    title: String(r.title ?? ''),
+    answer: String(r.answer ?? ''),
+    keyPoints: String(r.key_points ?? r.keyPoints ?? ''),
+    difficulty: (r.difficulty ?? 'medium') as InterviewQuestion['difficulty'],
+    source: r.source ? String(r.source) : '',
+    favorite: Boolean(r.favorite),
+    createdAt: Number(r.created_at ?? r.createdAt ?? 0),
+    updatedAt: Number(r.updated_at ?? r.updatedAt ?? 0)
+  }
+}
+
 export async function listQuestions(params: ListParams = {}): Promise<ListResult> {
   const qs = new URLSearchParams()
   if (params.category) qs.set('category', params.category)
@@ -73,13 +92,14 @@ export async function listQuestions(params: ListParams = {}): Promise<ListResult
   qs.set('page_size', String(params.pageSize ?? 20))
   const r = await backendGetJson(`/interview/questions?${qs.toString()}`)
   if (!r.ok) throw new Error(r.message)
-  return r.data as ListResult
+  const data = r.data as ListResult
+  return { ...data, items: (data.items || []).map((x) => normalizeQuestion(x as unknown as Record<string, unknown>)) }
 }
 
 export async function getQuestion(id: string): Promise<InterviewQuestion> {
   const r = await backendGetJson(`/interview/questions/${id}`)
   if (!r.ok) throw new Error(r.message)
-  return r.data as InterviewQuestion
+  return normalizeQuestion(r.data as Record<string, unknown>)
 }
 
 export async function createQuestion(
@@ -87,7 +107,7 @@ export async function createQuestion(
 ): Promise<InterviewQuestion> {
   const r = await backendPostJson('/interview/questions', data)
   if (!r.ok) throw new Error(r.message)
-  return r.data as InterviewQuestion
+  return normalizeQuestion(r.data as Record<string, unknown>)
 }
 
 export async function updateQuestion(
@@ -96,7 +116,7 @@ export async function updateQuestion(
 ): Promise<InterviewQuestion> {
   const r = await request('PUT', `/interview/questions/${id}`, data)
   if (!r.ok) throw new Error(r.message)
-  return r.data as InterviewQuestion
+  return normalizeQuestion(r.data as Record<string, unknown>)
 }
 
 export async function deleteQuestion(id: string): Promise<void> {
@@ -156,6 +176,84 @@ export async function downloadExport(
   a.download = filename
   a.click()
   URL.revokeObjectURL(a.href)
+}
+
+/** 导出 Excel（调用后端专用接口 /export-excel，答案与核心要点完整展示） */
+export async function downloadExcelExport(params: {
+  category?: string
+  difficulty?: string
+  keyword?: string
+}): Promise<void> {
+  const qs = new URLSearchParams()
+  if (params.category) qs.set('category', params.category)
+  if (params.difficulty) qs.set('difficulty', params.difficulty)
+  if (params.keyword) qs.set('keyword', params.keyword)
+  const url = resolveApiUrl(`/interview/export-excel?${qs.toString()}`)
+  if (!url) throw new Error('请先在「个人中心 → 后端加速」开启后端')
+  const resp = await fetch(url)
+  if (!resp.ok) {
+    let msg = `导出失败：HTTP ${resp.status}`
+    try {
+      const j = (await resp.json()) as { detail?: unknown }
+      if (j?.detail) msg += `：${String(j.detail).slice(0, 300)}`
+    } catch { /* 忽略非 JSON 响应 */ }
+    throw new Error(msg)
+  }
+  const blob = await resp.blob()
+  const disp = resp.headers.get('Content-Disposition') || ''
+  const m = /filename\*=UTF-8''([^;]+)/i.exec(disp)
+  const filename = m ? decodeURIComponent(m[1]) : 'interview_bank.xlsx'
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(a.href)
+}
+
+/** 前端本地解析 Excel 文件为题目数组（不经过任何服务器） */
+export async function parseExcelImport(file: File): Promise<Array<Record<string, unknown>>> {
+  const XLSX = await import('xlsx')
+  const data = await file.arrayBuffer()
+  const wb = XLSX.read(data, { type: 'array' })
+  const sheetName = wb.SheetNames[0]
+  if (!sheetName) return []
+  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets[sheetName], { defval: '' })
+
+  // 表头映射：支持中英文与常见变体
+  const knownAliases: Record<string, string> = {
+    '分类': 'category', 'category': 'category', '类别': 'category',
+    '难度': 'difficulty', 'difficulty': 'difficulty',
+    '题干': 'title', '题目': 'title', 'title': 'title', 'question': 'title', '问题': 'title',
+    '答案': 'answer', '参考答案': 'answer', 'answer': 'answer',
+    '核心要点': 'keyPoints', '要点': 'keyPoints', 'key_points': 'keyPoints', 'keypoints': 'keyPoints',
+    '标签': 'tags', 'tags': 'tags', 'tag': 'tags',
+    '来源': 'source', 'source': 'source'
+  }
+  const fieldMap: Record<string, string> = {}
+  if (rows.length > 0) {
+    for (const k of Object.keys(rows[0])) {
+      const norm = k.trim().toLowerCase()
+      if (knownAliases[norm]) fieldMap[k] = knownAliases[norm]
+    }
+  }
+
+  return rows
+    .map((row) => {
+      const obj: Record<string, unknown> = {}
+      for (const rawKey in row) {
+        const target = fieldMap[rawKey]
+        if (!target) continue
+        const val = row[rawKey]
+        if (target === 'tags') {
+          const s = String(val ?? '').trim()
+          if (s) obj.tags = s.split(/[,，、;；]/).map((t) => t.trim()).filter(Boolean)
+        } else {
+          obj[target] = String(val ?? '').trim()
+        }
+      }
+      return obj
+    })
+    .filter((o) => o.title)
 }
 
 // ---------- 批量操作 ----------
@@ -246,7 +344,7 @@ export async function quizQuestions(params: QuizParams): Promise<InterviewQuesti
   qs.set('count', String(params.count ?? 10))
   const r = await backendGetJson(`/interview/quiz?${qs.toString()}`)
   if (!r.ok) throw new Error(r.message)
-  return ((r.data as { items: InterviewQuestion[] }).items) || []
+  return (((r.data as { items: unknown[] }).items) || []).map((x) => normalizeQuestion(x as Record<string, unknown>))
 }
 
 export async function getStats(): Promise<{
@@ -289,14 +387,16 @@ export function parseImportText(text: string): Array<Record<string, unknown>> {
     let answer = ''
     let category = ''
     let difficulty = ''
+    let keyPoints = ''
     const tags: string[] = []
     for (const line of lines) {
-      const m = line.match(/^(分类|category|类别|tag|标签|难度|difficulty)[:：]\s*(.+)$/i)
+      const m = line.match(/^(分类|category|类别|tag|标签|难度|difficulty|要点|核心要点|key_points|keyPoints)[:：]\s*(.+)$/i)
       if (m) {
         const val = m[2].trim()
         if (['分类', 'category', '类别'].includes(m[1])) category = val
         else if (['tag', '标签'].includes(m[1])) tags.push(...val.split(/[,，]/).map((s) => s.trim()).filter(Boolean))
         else if (['难度', 'difficulty'].includes(m[1])) difficulty = val
+        else keyPoints = val
         continue
       }
       if (/^(答|答案|answer)[:：]/i.test(line)) {
@@ -310,6 +410,7 @@ export function parseImportText(text: string): Array<Record<string, unknown>> {
     return {
       title: title.trim(),
       answer: answer.trim(),
+      keyPoints: keyPoints || undefined,
       category: category || undefined,
       tags: tags.length ? tags : undefined,
       difficulty: difficulty || undefined

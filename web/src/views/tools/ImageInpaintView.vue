@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import ToolHeader from '@/components/tools/ToolHeader.vue'
 import FileDropZone from '@/components/common/FileDropZone.vue'
 import { RouterLink } from 'vue-router'
 import { usePreferenceStore } from '@/stores/preference'
-import { resolveApiUrl, backendFetch } from '@/utils/api'
+import { backendFetch } from '@/utils/api'
 import { downloadBlob, formatBytes, baseName } from '@/utils/file'
 
 const pref = usePreferenceStore()

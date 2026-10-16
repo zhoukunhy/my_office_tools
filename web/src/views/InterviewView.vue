@@ -1,3 +1,406 @@
+<template>
+  <div class="page-interview">
+    <!-- ============ 顶部 Hero ============ -->
+    <div class="hero">
+      <div class="hero-text">
+        <h1 class="hero-title">
+          <el-icon :size="28"><Reading /></el-icon>
+          面试题库
+        </h1>
+        <p class="hero-sub">整理面试题 · 核心要点提炼 · 随机抽题模拟练习</p>
+      </div>
+      <div class="hero-right">
+        <el-radio-group v-model="mode" size="large">
+          <el-radio-button value="bank">题库管理</el-radio-button>
+          <el-radio-button value="quiz">模拟刷题</el-radio-button>
+        </el-radio-group>
+        <el-button
+          v-if="mode === 'bank'"
+          type="primary" size="large" :icon="Plus"
+          @click="openNew"
+        >新增题目</el-button>
+      </div>
+    </div>
+
+    <!-- ============ 题库管理 ============ -->
+    <div v-if="mode === 'bank'" class="bank-layout">
+      <!-- 左侧筛选 -->
+      <aside class="side-panel">
+        <div class="side-block">
+          <h4 class="side-title">分类</h4>
+          <div class="side-list">
+            <button
+              class="side-item"
+              :class="{ active: filterCategory === '' }"
+              @click="setFilter('category', '')"
+            >
+              全部 <span class="side-count">{{ stats.total }}</span>
+            </button>
+            <button
+              v-for="c in INTERVIEW_CATEGORIES"
+              :key="c.id"
+              class="side-item"
+              :class="{ active: filterCategory === c.id }"
+              @click="setFilter('category', c.id)"
+            >
+              <span class="dot" :style="{ background: c.color }" />
+              {{ c.name }}
+              <span class="side-count">{{ stats.by_category[c.id] || 0 }}</span>
+            </button>
+          </div>
+        </div>
+        <div class="side-block">
+          <h4 class="side-title">难度</h4>
+          <div class="side-list">
+            <button
+              class="side-item"
+              :class="{ active: filterDifficulty === '' }"
+              @click="setFilter('difficulty', '')"
+            >全部</button>
+            <button
+              v-for="(d, key) in DIFFICULTY_META"
+              :key="key"
+              class="side-item"
+              :class="{ active: filterDifficulty === key }"
+              @click="setFilter('difficulty', key)"
+            >
+              <span class="dot" :style="{ background: d.color }" />
+              {{ d.name }}
+            </button>
+          </div>
+        </div>
+        <div class="side-block">
+          <h4 class="side-title">快捷筛选</h4>
+          <el-checkbox v-model="filterFavorite" @change="onFilterChange">仅看收藏</el-checkbox>
+          <el-select
+            v-model="filterTag" placeholder="按标签筛选" clearable filterable
+            style="width: 100%; margin-top: 8px" @change="onFilterChange"
+          >
+            <el-option v-for="t in allTags" :key="t" :label="`#${t}`" :value="t" />
+          </el-select>
+        </div>
+      </aside>
+
+      <!-- 右侧主区 -->
+      <div class="list-main">
+        <div class="list-toolbar">
+          <el-input
+            v-model="keyword"
+            placeholder="搜索题干 / 答案关键词…"
+            :prefix-icon="Search"
+            clearable
+            style="max-width: 320px"
+            @input="onKeywordChange"
+          />
+          <el-button :icon="Refresh" circle title="刷新" @click="onFilterChange" />
+          <el-divider direction="vertical" />
+          <el-button :icon="Upload" @click="importVisible = true">导入</el-button>
+          <el-button :icon="Download" @click="exportVisible = true">导出</el-button>
+          <el-button :icon="MagicStick" @click="aiVisible = true">AI 生成</el-button>
+          <em v-if="selectedIds.size > 0" class="batch-tip">已选 {{ selectedIds.size }} 题</em>
+        </div>
+
+        <!-- 批量操作条：勾选后自动出现 -->
+        <div v-if="selectedIds.size > 0" class="batch-bar">
+          <span>已选 {{ selectedIds.size }} 题</span>
+          <el-button size="small" @click="selectPage">全选本页</el-button>
+          <el-button size="small" @click="batchFavorite(true)">批量收藏</el-button>
+          <el-button size="small" @click="batchFavorite(false)">取消收藏</el-button>
+          <el-input v-model="batchTag" placeholder="输入标签" size="small" style="width: 120px" />
+          <el-button size="small" type="primary" @click="batchTagAdd">批量打标签</el-button>
+          <el-button size="small" type="danger" @click="batchRemove">批量删除</el-button>
+        </div>
+
+        <div v-loading="loading" class="q-table-wrap">
+          <div v-if="!questions.length && !loading" class="empty-state">
+            <el-icon :size="40"><Collection /></el-icon>
+            <p>暂无题目，点击「新增题目」或「导入」开始整理</p>
+          </div>
+          <el-table
+            v-else
+            ref="tableRef"
+            :data="questions"
+            row-key="id"
+            border
+            stripe
+            class="q-table"
+            :row-class-name="rowClassName"
+            @row-click="openEdit"
+            @selection-change="onSelectionChange"
+          >
+            <el-table-column type="selection" width="44" align="center" />
+            <el-table-column label="分类" width="92" align="center">
+              <template #default="{ row }">
+                <span class="tag-cat" :style="{ background: getCategoryMeta(row.category).color }">
+                  {{ getCategoryMeta(row.category).name }}
+                </span>
+              </template>
+            </el-table-column>
+            <el-table-column label="难度" width="72" align="center">
+              <template #default="{ row }">
+                <span class="tag-diff" :style="{ color: getDifficultyMeta(row.difficulty).color }">
+                  {{ getDifficultyMeta(row.difficulty).name }}
+                </span>
+              </template>
+            </el-table-column>
+            <el-table-column label="题干" min-width="220" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span class="cell-title">{{ row.title }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="答案" min-width="200" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span class="cell-muted">{{ row.answer || '—' }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="核心要点" min-width="180" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span class="cell-muted">{{ row.keyPoints || '—' }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="标签" width="140">
+              <template #default="{ row }">
+                <div class="cell-tags">
+                  <span v-for="t in row.tags" :key="t" class="tag">#{{ t }}</span>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column prop="source" label="来源" width="100" show-overflow-tooltip />
+            <el-table-column label="更新" width="96" align="center">
+              <template #default="{ row }">
+                <span class="cell-muted">{{ fmtDate(row.updatedAt) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="168" align="center" fixed="right">
+              <template #default="{ row }">
+                <div class="cell-actions" @click.stop>
+                  <el-tooltip :content="row.favorite ? '取消收藏' : '收藏'">
+                    <el-icon
+                      class="fav-icon"
+                      :class="{ active: row.favorite }"
+                      @click="toggleFavorite(row)"
+                    ><Star /></el-icon>
+                  </el-tooltip>
+                  <el-button link type="primary" :icon="Edit" @click="openEdit(row)">编辑</el-button>
+                  <el-button link type="danger" :icon="Delete" @click="removeQuestion(row)">删除</el-button>
+                </div>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+
+        <div class="pagination">
+          <el-pagination
+            v-model:current-page="page"
+            :page-size="PAGE_SIZE"
+            :total="total"
+            layout="prev, pager, next, total"
+            @current-change="loadList"
+          />
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 模拟刷题 ============ -->
+    <div v-else-if="mode === 'quiz'" class="quiz-layout">
+      <div v-if="!quizStarted" class="quiz-config">
+        <h3>抽题设置</h3>
+        <div class="form-row">
+          <label>分类</label>
+          <el-select v-model="quizCategories" multiple collapse-tags placeholder="全部分类" style="width: 100%">
+            <el-option
+              v-for="c in INTERVIEW_CATEGORIES" :key="c.id"
+              :label="c.name" :value="c.id"
+            />
+          </el-select>
+        </div>
+        <div class="form-row">
+          <label>难度</label>
+          <el-select v-model="quizDifficulties" multiple collapse-tags placeholder="全部难度" style="width: 100%">
+            <el-option
+              v-for="(d, key) in DIFFICULTY_META" :key="key"
+              :label="d.name" :value="key"
+            />
+          </el-select>
+        </div>
+        <div class="form-row">
+          <label>标签</label>
+          <el-select v-model="quizTags" multiple filterable collapse-tags placeholder="不限标签" style="width: 100%">
+            <el-option v-for="t in allTags" :key="t" :label="`#${t}`" :value="t" />
+          </el-select>
+        </div>
+        <div class="form-row">
+          <label>题目数量</label>
+          <el-input-number v-model="quizCount" :min="1" :max="50" />
+        </div>
+        <el-button type="primary" size="large" style="width: 100%" :loading="quizLoading" @click="startQuiz">
+          开始刷题
+        </el-button>
+      </div>
+
+      <div v-else class="quiz-panel">
+        <div class="quiz-head">
+          <el-button :icon="ArrowLeft" @click="confirmExitQuiz">退出刷题</el-button>
+          <span class="quiz-progress">第 {{ quizIndex + 1 }} / {{ quizList.length }} 题</span>
+          <el-button :icon="ArrowRight" :disabled="quizIndex >= quizList.length - 1" @click="nextQuiz">
+            下一题
+          </el-button>
+        </div>
+        <div v-if="currentQuiz" class="quiz-card">
+          <div class="quiz-meta">
+            <span class="tag-cat" :style="{ background: getCategoryMeta(currentQuiz.category).color }">
+              {{ getCategoryMeta(currentQuiz.category).name }}
+            </span>
+            <span class="tag-diff" :style="{ color: DIFFICULTY_META[currentQuiz.difficulty].color }">
+              {{ DIFFICULTY_META[currentQuiz.difficulty].name }}
+            </span>
+            <span v-for="t in currentQuiz.tags" :key="t" class="tag">#{{ t }}</span>
+          </div>
+          <h2 class="quiz-title">{{ currentQuiz.title }}</h2>
+          <el-input
+            v-model="quizAnswer"
+            type="textarea"
+            :rows="5"
+            placeholder="先自己口头作答或写下要点，再对照参考答案…"
+            style="margin: 14px 0"
+          />
+          <el-collapse v-model="quizReveal">
+            <el-collapse-item title="查看参考答案" name="answer">
+              <p class="quiz-answer">{{ currentQuiz.answer }}</p>
+              <template v-if="currentQuiz.keyPoints">
+                <p class="quiz-kp-title">💡 面试核心要点</p>
+                <p class="quiz-kp">{{ currentQuiz.keyPoints }}</p>
+              </template>
+            </el-collapse-item>
+          </el-collapse>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 编辑弹窗 ============ -->
+    <el-dialog v-model="editVisible" :title="editing?.id ? '编辑题目' : '新增题目'" width="720px" top="6vh">
+      <div v-if="editing" class="edit-form">
+        <div class="form-row">
+          <label>题干 <i class="req">*</i></label>
+          <el-input v-model="editing.title" type="textarea" :rows="2" placeholder="输入面试题题目" />
+        </div>
+        <div class="form-row">
+          <label>参考答案</label>
+          <el-input
+            v-model="editing.answer"
+            type="textarea"
+            :autosize="{ minRows: 10, maxRows: 24 }"
+            placeholder="完整的参考答案（支持换行，输入框会随内容自动增高）"
+          />
+        </div>
+        <div class="form-row">
+          <label>面试核心要点</label>
+          <el-input
+            v-model="editing.keyPoints"
+            type="textarea"
+            :autosize="{ minRows: 4, maxRows: 12 }"
+            placeholder="回答这道题时必须覆盖的关键点，面试官重点考察的部分"
+          />
+        </div>
+        <div class="form-grid">
+          <div class="form-row">
+            <label>分类</label>
+            <el-select v-model="editing.category" style="width: 100%">
+              <el-option
+                v-for="c in INTERVIEW_CATEGORIES" :key="c.id"
+                :label="c.name" :value="c.id"
+              />
+            </el-select>
+          </div>
+          <div class="form-row">
+            <label>难度</label>
+            <el-select v-model="editing.difficulty" style="width: 100%">
+              <el-option
+                v-for="(d, key) in DIFFICULTY_META" :key="key"
+                :label="d.name" :value="key"
+              />
+            </el-select>
+          </div>
+        </div>
+        <div class="form-grid">
+          <div class="form-row">
+            <label>标签（逗号分隔）</label>
+            <el-input v-model="editing.tagsText" placeholder="如：Vue, 响应式" />
+          </div>
+          <div class="form-row">
+            <label>来源</label>
+            <el-input v-model="editing.source" placeholder="如：某公司一面 / 牛客网" />
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="editVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="saveEdit">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- ============ 导入弹窗 ============ -->
+    <el-dialog v-model="importVisible" title="导入题目" width="720px" top="6vh">
+      <p class="import-tip">
+        支持以下方式：<br />
+        · <strong>上传 Excel</strong>：.xlsx / .xls（表头：分类、难度、题干、答案、核心要点、标签、来源），可先
+        <el-button link type="primary" @click="downloadImportTemplate">下载导入模板</el-button><br />
+        · <strong>上传文件</strong>：.json / .txt / .md（UTF-8）<br />
+        · <strong>粘贴 JSON 数组</strong>：<code>[{ "title": "...", "answer": "...", "keyPoints": "...", "category": "frontend", "tags": ["Vue"], "difficulty": "easy" }]</code><br />
+        · <strong>粘贴文本</strong>：每题空行分隔，首行题干，"答：" 开头为答案，可标注 <code>分类：前端</code> <code>要点：…</code> <code>标签：Vue</code> <code>难度：简单</code>
+      </p>
+      <el-upload
+        drag
+        :auto-upload="false"
+        :show-file-list="true"
+        :limit="1"
+        accept=".json,.txt,.md,.xlsx,.xls"
+        :on-change="onFilePick"
+        :on-remove="() => (pickedFile = null)"
+        style="margin-bottom: 14px"
+      >
+        <el-icon :size="32"><Upload /></el-icon>
+        <div class="el-upload__text">拖拽文件到此处，或 <em>点击选择</em>（Excel 在浏览器本地解析，不会上传）</div>
+      </el-upload>
+      <el-input
+        v-model="importText"
+        type="textarea"
+        :rows="8"
+        placeholder='或直接粘贴 JSON / 文本，例如：
+什么是闭包？
+答：闭包是指……
+分类：前端
+要点：作用域链、变量引用、内存泄漏'
+      />
+      <template #footer>
+        <el-button @click="importVisible = false">取消</el-button>
+        <el-button type="primary" :loading="importing" @click="doImport">确认导入</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- ============ 导出弹窗 ============ -->
+    <el-dialog v-model="exportVisible" title="导出题目" width="500px">
+      <p class="import-tip">
+        按当前筛选条件导出（分类 {{ filterCategory ? getCategoryMeta(filterCategory).name : '全部' }} /
+        难度 {{ filterDifficulty || '全部' }} / 关键词 {{ keyword || '无' }} /
+        {{ filterFavorite ? '仅收藏' : '全部' }}）<br />
+        · <strong>Excel</strong>：.xlsx 表格，答案与核心要点完整展示，可直接用 Excel/WPS 打开编辑<br />
+        · <strong>JSON</strong>：结构化数据，可直接重新导入<br />
+        · <strong>文本</strong>：与粘贴导入格式互通，方便编辑分享
+      </p>
+      <template #footer>
+        <el-button @click="exportVisible = false">取消</el-button>
+        <el-button :icon="Download" @click="doExport('text')">TXT</el-button>
+        <el-button :icon="Download" @click="doExport('json')">JSON</el-button>
+        <el-button type="primary" :icon="Download" @click="doExportExcel">Excel</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- ============ AI 生成弹窗 ============ -->
+    <AiGenerateDialog v-model="aiVisible" @generated="onAiGenerated" />
+  </div>
+</template>
+
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -11,72 +414,96 @@ import {
 } from '@/types/interview'
 import {
   listQuestions, createQuestion, updateQuestion, deleteQuestion,
-  importQuestions, importFile as importFileApi, downloadExport,
+  importQuestions, importFile as importFileApi, downloadExport, downloadExcelExport, parseExcelImport,
   batchDeleteQuestions, batchUpdateQuestions, saveQuizRecords,
   quizQuestions as fetchQuizQuestions, getStats, parseImportText,
   type ListParams
 } from '@/composables/useInterviewBank'
-import RecordsView from '@/components/interview/RecordsView.vue'
 import AiGenerateDialog from '@/components/interview/AiGenerateDialog.vue'
 
-type Mode = 'bank' | 'quiz' | 'records'
+const PAGE_SIZE = 20
 
-const mode = ref<Mode>('bank')
-const loading = ref(false)
-const questions = ref<InterviewQuestion[]>([])
-const total = ref(0)
-const stats = ref<{ total: number; by_category: Record<string, number>; favorites: number }>({
-  total: 0, by_category: {}, favorites: 0
-})
+function getDifficultyMeta(d: string) {
+  return DIFFICULTY_META[d as Difficulty] ?? DIFFICULTY_META.medium
+}
 
-// 筛选条件
-const filterCategory = ref<InterviewCategory | ''>('')
-const filterTag = ref('')
-const filterDifficulty = ref<Difficulty | ''>('')
-const filterFavorite = ref(false)
-const keyword = ref('')
-const page = ref(1)
-const pageSize = 20
+type BankMode = 'bank' | 'quiz'
+const mode = ref<BankMode>('bank')
 
-const allTags = computed(() => {
-  const set = new Set<string>()
-  questions.value.forEach((q) => q.tags.forEach((t) => set.add(t)))
-  return Array.from(set)
-})
-
+// ---------- 统计 ----------
+const stats = ref({ total: 0, by_category: {} as Record<string, number> })
 async function loadStats() {
   try {
     stats.value = await getStats()
-  } catch (e) {
-    console.warn(e)
+  } catch { /* 后端未开启时静默 */ }
+}
+
+// ---------- 列表与筛选 ----------
+const questions = ref<InterviewQuestion[]>([])
+const loading = ref(false)
+const total = ref(0)
+const page = ref(1)
+const keyword = ref('')
+const filterCategory = ref<InterviewCategory | ''>('')
+const filterDifficulty = ref<Difficulty | ''>('')
+const filterFavorite = ref(false)
+const filterTag = ref('')
+const allTags = ref<string[]>([])
+
+function fmtDate(ts?: number) {
+  if (!ts) return '—'
+  const d = new Date(ts)
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString()
+}
+
+function currentParams(): ListParams {
+  return {
+    category: filterCategory.value || undefined,
+    difficulty: filterDifficulty.value || undefined,
+    keyword: keyword.value || undefined,
+    favorite: filterFavorite.value ? true : undefined,
+    tag: filterTag.value || undefined,
+    page: page.value,
+    pageSize: PAGE_SIZE
   }
 }
 
 async function loadList() {
   loading.value = true
   try {
-    const params: ListParams = {
-      category: filterCategory.value || undefined,
-      tag: filterTag.value || undefined,
-      difficulty: filterDifficulty.value || undefined,
-      keyword: keyword.value || undefined,
-      favorite: filterFavorite.value || undefined,
-      page: page.value,
-      pageSize
-    }
-    const r = await listQuestions(params)
+    const r = await listQuestions(currentParams())
     questions.value = r.items
     total.value = r.total
-  } catch (e: unknown) {
-    ElMessage.error(e instanceof Error ? e.message : '加载失败')
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '加载题目失败')
   } finally {
     loading.value = false
   }
 }
 
-function resetAndLoad() {
+function setFilter(key: 'category' | 'difficulty', val: string) {
+  if (key === 'category') filterCategory.value = val as InterviewCategory | ''
+  else filterDifficulty.value = val as Difficulty | ''
   page.value = 1
   loadList()
+}
+
+function onFilterChange() {
+  page.value = 1
+  loadList()
+}
+
+const onKeywordChange = debounce(() => {
+  page.value = 1
+  loadList()
+}, 200)
+
+function debounce<T extends (...args: never[]) => void>(fn: T, delay: number) {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  return (...args: Parameters<T>) => {
+    if (timer) clearTimeout(timer)
+    timer = setTimeout(() => fn(...args), delay)
+  }
 }
 
 onMounted(() => {
@@ -84,80 +511,177 @@ onMounted(() => {
   loadList()
 })
 
-// ---------- 编辑弹窗 ----------
+// ---------- 编辑 ----------
 const editVisible = ref(false)
-const editing = ref<Partial<InterviewQuestion> | null>(null)
-const isNew = ref(false)
+const editing = ref<Partial<InterviewQuestion> & { tagsText?: string } | null>(null)
+const saving = ref(false)
 
 function openNew() {
   editing.value = {
-    category: filterCategory.value || 'frontend',
-    tags: [],
-    title: '',
-    answer: '',
-    difficulty: 'medium',
-    source: '',
-    favorite: false
+    category: 'frontend', tagsText: '', title: '', answer: '', keyPoints: '',
+    difficulty: 'medium', source: ''
   }
-  isNew.value = true
   editVisible.value = true
 }
 
 function openEdit(q: InterviewQuestion) {
-  editing.value = { ...q }
-  isNew.value = false
+  editing.value = { ...q, tagsText: (q.tags || []).join(', ') }
   editVisible.value = true
 }
 
 async function saveEdit() {
-  if (!editing.value?.title?.trim()) {
-    ElMessage.warning('题干不能为空')
+  const e = editing.value
+  if (!e) return
+  if (!e.title?.trim()) {
+    ElMessage.warning('请填写题干')
     return
   }
+  saving.value = true
   try {
-    if (isNew.value) {
-      await createQuestion(editing.value as Omit<InterviewQuestion, 'id' | 'createdAt' | 'updatedAt'>)
-      ElMessage.success('已新增')
-    } else {
-      await updateQuestion(editing.value!.id!, editing.value)
-      ElMessage.success('已保存')
+    const payload = {
+      ...e,
+      tags: e.tagsText ? e.tagsText.split(/[,，]/).map((s) => s.trim()).filter(Boolean) : []
     }
+    if (e.id) await updateQuestion(e.id, payload as Partial<InterviewQuestion>)
+    else await createQuestion(payload as Omit<InterviewQuestion, 'id' | 'createdAt' | 'updatedAt'>)
+    ElMessage.success('保存成功')
     editVisible.value = false
     loadStats()
     loadList()
-  } catch (e: unknown) {
-    ElMessage.error(e instanceof Error ? e.message : '保存失败')
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '保存失败')
+  } finally {
+    saving.value = false
   }
 }
 
 async function removeQuestion(q: InterviewQuestion) {
   try {
-    await ElMessageBox.confirm(`确定删除「${q.title.slice(0, 30)}」？`, '删除题目', { type: 'warning' })
+    await ElMessageBox.confirm(`确定删除「${q.title.slice(0, 30)}…」？`, '删除确认', { type: 'warning' })
+  } catch { return }
+  try {
     await deleteQuestion(q.id)
     ElMessage.success('已删除')
     loadStats()
     loadList()
-  } catch { /* 取消 */ }
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '删除失败')
+  }
 }
 
 async function toggleFavorite(q: InterviewQuestion) {
-  await updateQuestion(q.id, { favorite: !q.favorite })
-  q.favorite = !q.favorite
-  loadStats()
+  try {
+    await updateQuestion(q.id, { favorite: !q.favorite })
+    q.favorite = !q.favorite
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '操作失败')
+  }
 }
 
-// ---------- 导入弹窗 ----------
+// ---------- 批量操作 ----------
+const selectedIds = ref<Set<string>>(new Set())
+const batchTag = ref('')
+const tableRef = ref()
+
+function onSelectionChange(rows: InterviewQuestion[]) {
+  selectedIds.value = new Set(rows.map((r) => r.id))
+}
+
+function rowClassName({ row }: { row: InterviewQuestion }): string {
+  return selectedIds.value.has(row.id) ? 'row-selected' : ''
+}
+
+function selectPage() {
+  tableRef.value?.toggleAllSelection()
+}
+
+async function batchFavorite(fav: boolean) {
+  if (!selectedIds.value.size) {
+    ElMessage.warning('请先勾选题目')
+    return
+  }
+  try {
+    const r = await batchUpdateQuestions([...selectedIds.value], { favorite: fav })
+    ElMessage.success(`已更新 ${r.updated} 题`)
+    loadList()
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '批量操作失败')
+  }
+}
+
+async function batchTagAdd() {
+  const t = batchTag.value.trim()
+  if (!t) {
+    ElMessage.warning('请输入要添加的标签')
+    return
+  }
+  if (!selectedIds.value.size) {
+    ElMessage.warning('请先勾选题目')
+    return
+  }
+  try {
+    const targets = questions.value.filter((q) => selectedIds.value.has(q.id))
+    await Promise.all(
+      targets.map((q) =>
+        updateQuestion(q.id, { tags: [...new Set([...(q.tags || []), t])] })
+      )
+    )
+    ElMessage.success(`已为 ${targets.length} 题添加标签 #${t}`)
+    batchTag.value = ''
+    loadList()
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '批量打标签失败')
+  }
+}
+
+async function batchRemove() {
+  if (!selectedIds.value.size) {
+    ElMessage.warning('请先勾选题目')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(`确定删除选中的 ${selectedIds.value.size} 题？`, '批量删除', { type: 'warning' })
+  } catch { return }
+  try {
+    const r = await batchDeleteQuestions([...selectedIds.value])
+    ElMessage.success(`已删除 ${r.deleted} 题`)
+    selectedIds.value = new Set()
+    tableRef.value?.clearSelection()
+    loadStats()
+    loadList()
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '批量删除失败')
+  }
+}
+
+// ---------- 导入 ----------
 const importVisible = ref(false)
 const importText = ref('')
+const pickedFile = ref<File | null>(null)
+const importing = ref(false)
 
-function openImport() {
-  importText.value = ''
-  importVisible.value = true
+function onFilePick(file: { raw?: File }) {
+  pickedFile.value = file.raw || null
 }
 
 async function doImport() {
+  importing.value = true
   try {
     if (pickedFile.value) {
+      const name = pickedFile.value.name.toLowerCase()
+      if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
+        const items = await parseExcelImport(pickedFile.value)
+        if (!items.length) {
+          ElMessage.warning('未从 Excel 解析到有效题目，请检查表头是否为「分类/难度/题干/答案/核心要点/标签/来源」')
+          return
+        }
+        const r = await importQuestions(items)
+        ElMessage.success(`导入 ${r.inserted} 条，跳过 ${r.skipped} 条`)
+        importVisible.value = false
+        loadStats()
+        loadList()
+        return
+      }
       const r = await importFileApi(pickedFile.value)
       ElMessage.success(`导入 ${r.inserted} 条，跳过 ${r.skipped} 条`)
       importVisible.value = false
@@ -175,19 +699,16 @@ async function doImport() {
     importVisible.value = false
     loadStats()
     loadList()
-  } catch (e: unknown) {
+  } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '导入失败')
+  } finally {
+    importing.value = false
   }
-}
-
-// ---------- 文件选择导入 ----------
-const pickedFile = ref<File | null>(null)
-function onFilePick(file: { raw?: File }) {
-  pickedFile.value = file.raw ?? null
 }
 
 // ---------- 导出 ----------
 const exportVisible = ref(false)
+
 async function doExport(format: 'json' | 'text') {
   try {
     await downloadExport(
@@ -199,575 +720,221 @@ async function doExport(format: 'json' | 'text') {
       format
     )
     exportVisible.value = false
-  } catch (e: unknown) {
+  } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '导出失败')
   }
 }
 
-// ---------- 批量操作 ----------
-const batchMode = ref(false)
-const selectedIds = ref<Set<string>>(new Set())
-const batchTag = ref('')
-
-function toggleBatch() {
-  batchMode.value = !batchMode.value
-  selectedIds.value = new Set()
-}
-function onCardClick(q: InterviewQuestion) {
-  if (!batchMode.value) return
-  const s = new Set(selectedIds.value)
-  if (s.has(q.id)) s.delete(q.id)
-  else s.add(q.id)
-  selectedIds.value = s
-}
-function selectPage() {
-  selectedIds.value = new Set(questions.value.map((q) => q.id))
-}
-async function doBatchDelete() {
-  const ids = Array.from(selectedIds.value)
-  if (!ids.length) {
-    ElMessage.warning('未选择题目')
-    return
-  }
+async function doExportExcel() {
   try {
-    await ElMessageBox.confirm(`确定删除选中的 ${ids.length} 道题？相关问答记录将一并清除。`, '批量删除', { type: 'warning' })
-    const r = await batchDeleteQuestions(ids)
-    ElMessage.success(`已删除 ${r.deleted} 题`)
-    selectedIds.value = new Set()
-    loadStats()
-    loadList()
+    await downloadExcelExport({
+      category: filterCategory.value || undefined,
+      difficulty: filterDifficulty.value || undefined,
+      keyword: keyword.value || undefined
+    })
+    exportVisible.value = false
   } catch (e) {
-    if (e instanceof Error) ElMessage.error(e.message)
-  }
-}
-async function doBatchTag() {
-  const ids = Array.from(selectedIds.value)
-  const tags = batchTag.value.split(/[,，]/).map((s) => s.trim()).filter(Boolean)
-  if (!ids.length) {
-    ElMessage.warning('未选择题目')
-    return
-  }
-  if (!tags.length) {
-    ElMessage.warning('请输入标签')
-    return
-  }
-  try {
-    const r = await batchUpdateQuestions(ids, { tags })
-    ElMessage.success(`已为 ${r.updated} 题覆盖设置标签`)
-    batchTag.value = ''
-    loadList()
-  } catch (e) {
-    if (e instanceof Error) ElMessage.error(e.message)
+    ElMessage.error(e instanceof Error ? e.message : '导出失败')
   }
 }
 
-// ---------- AI 出题 ----------
+/** 下载 Excel 导入模板（纯前端生成，含示例行） */
+async function downloadImportTemplate() {
+  try {
+    const XLSX = await import('xlsx')
+    const ws = XLSX.utils.json_to_sheet([
+      {
+        分类: '前端',
+        难度: '简单',
+        题干: 'Vue 中 computed 和 watch 的区别？',
+        答案: 'computed 是计算属性，基于依赖缓存……',
+        核心要点: '缓存机制、使用场景、副作用处理',
+        标签: 'Vue,响应式',
+        来源: '示例（此行可删除）'
+      }
+    ], { header: ['分类', '难度', '题干', '答案', '核心要点', '标签', '来源'] })
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, '面试题模板')
+    ws['!cols'] = [{ wch: 10 }, { wch: 8 }, { wch: 36 }, { wch: 60 }, { wch: 30 }, { wch: 18 }, { wch: 16 }]
+    XLSX.writeFile(wb, '面试题导入模板.xlsx')
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '模板下载失败')
+  }
+}
+
+// ---------- AI 生成 ----------
 const aiVisible = ref(false)
-function onAiImported() {
+function onAiGenerated() {
   loadStats()
   loadList()
 }
 
-// ---------- 问答模式 ----------
-const quizCategories = ref<InterviewCategory[]>(['frontend'])
+// ---------- 模拟刷题 ----------
+const quizCategories = ref<InterviewCategory[]>([])
 const quizDifficulties = ref<Difficulty[]>([])
+const quizTags = ref<string[]>([])
 const quizCount = ref(10)
+const quizLoading = ref(false)
 const quizStarted = ref(false)
-const quizQuestions = ref<InterviewQuestion[]>([])
+const quizList = ref<InterviewQuestion[]>([])
 const quizIndex = ref(0)
-const quizAnswers = ref<string[]>([])
-const quizRevealed = ref<boolean[]>([])
-const quizScores = ref<number[]>([])
-
-const currentQuiz = computed(() => quizQuestions.value[quizIndex.value])
+const quizAnswer = ref('')
+const quizReveal = ref<string[]>([])
+const currentQuiz = computed(() => quizList.value[quizIndex.value] || null)
 
 async function startQuiz() {
-  if (!quizCategories.value.length) {
-    ElMessage.warning('请至少选择一个分类')
-    return
-  }
+  quizLoading.value = true
   try {
-    quizQuestions.value = await fetchQuizQuestions({
-      categories: quizCategories.value,
-      difficulties: quizDifficulties.value,
+    const items = await fetchQuizQuestions({
+      categories: quizCategories.value.length ? quizCategories.value : undefined,
+      difficulties: quizDifficulties.value.length ? quizDifficulties.value : undefined,
+      tags: quizTags.value.length ? quizTags.value : undefined,
       count: quizCount.value
     })
-    if (!quizQuestions.value.length) {
-      ElMessage.warning('该筛选条件下暂无题目')
+    if (!items.length) {
+      ElMessage.warning('没有符合条件的题目')
       return
     }
+    quizList.value = items
     quizIndex.value = 0
-    quizAnswers.value = new Array(quizQuestions.value.length).fill('')
-    quizRevealed.value = new Array(quizQuestions.value.length).fill(false)
-    quizScores.value = new Array(quizQuestions.value.length).fill(-1)
+    quizAnswer.value = ''
+    quizReveal.value = []
     quizStarted.value = true
-  } catch (e: unknown) {
-    ElMessage.error(e instanceof Error ? e.message : '出题失败')
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '抽题失败')
+  } finally {
+    quizLoading.value = false
   }
 }
 
-function revealAnswer() {
-  quizRevealed.value[quizIndex.value] = true
+async function nextQuiz() {
+  if (!currentQuiz.value) return
+  try {
+    await saveQuizRecords([
+      { questionId: currentQuiz.value.id, userAnswer: quizAnswer.value, score: quizReveal.value.includes('answer') ? 1 : 0 }
+    ])
+  } catch { /* 记录失败不影响刷题 */ }
+  quizIndex.value += 1
+  quizAnswer.value = ''
+  quizReveal.value = []
 }
-function rate(s: number) {
-  quizScores.value[quizIndex.value] = s
-  // 自评即落库：错题本据此归类（score<=1 为错题）
-  const q = currentQuiz.value
-  if (q) {
-    saveQuizRecords([{ questionId: q.id, userAnswer: quizAnswers.value[quizIndex.value] || '', score: s }])
-      .catch(() => ElMessage.warning('记录保存失败，请检查后端连接'))
+
+async function confirmExitQuiz() {
+  try {
+    await ElMessageBox.confirm('退出后将结束本次刷题，已作答题目计入练习记录。', '退出刷题', { type: 'info' })
+  } catch { return }
+  if (currentQuiz.value && quizIndex.value < quizList.value.length - 1) {
+    try {
+      await saveQuizRecords([
+        { questionId: currentQuiz.value.id, userAnswer: quizAnswer.value, score: quizReveal.value.includes('answer') ? 1 : 0 }
+      ])
+    } catch { /* 忽略 */ }
   }
-}
-function nextQuiz() {
-  if (quizIndex.value < quizQuestions.value.length - 1) quizIndex.value++
-}
-function prevQuiz() {
-  if (quizIndex.value > 0) quizIndex.value--
-}
-function exitQuiz() {
   quizStarted.value = false
-  quizQuestions.value = []
+  quizList.value = []
+  loadStats()
 }
 </script>
 
-<template>
-  <div class="interview-page">
-    <header class="page-hero">
-      <div class="hero-left">
-        <el-icon class="hero-icon"><Reading /></el-icon>
-        <div>
-          <h1>面试题库</h1>
-          <p>分类整理 · 检索 · 导入 · 随机出题问答</p>
-        </div>
-      </div>
-      <div class="hero-right">
-        <el-radio-group v-model="mode" size="default">
-          <el-radio-button value="bank">题目库</el-radio-button>
-          <el-radio-button value="quiz">问答模式</el-radio-button>
-        </el-radio-group>
-      </div>
-    </header>
-
-    <!-- ============ 题目库模式 ============ -->
-    <div v-if="mode === 'bank'" class="bank-layout">
-      <aside class="filter-side">
-        <div class="side-card">
-          <div class="side-h">
-            <span>统计</span>
-            <el-button link :icon="Refresh" @click="loadStats" />
-          </div>
-          <div class="stat-row"><span>总题数</span><strong>{{ stats.total }}</strong></div>
-          <div class="stat-row"><span>收藏</span><strong>{{ stats.favorites }}</strong></div>
-        </div>
-
-        <div class="side-card">
-          <div class="side-h"><span>分类</span></div>
-          <div class="cat-list">
-            <div
-              class="cat-item"
-              :class="{ active: !filterCategory }"
-              @click="filterCategory = ''; resetAndLoad()"
-            >
-              <span>全部</span><em>{{ stats.total }}</em>
-            </div>
-            <div
-              v-for="c in INTERVIEW_CATEGORIES"
-              :key="c.id"
-              class="cat-item"
-              :class="{ active: filterCategory === c.id }"
-              @click="filterCategory = c.id; resetAndLoad()"
-            >
-              <span class="cat-dot" :style="{ background: c.color }" />
-              <span>{{ c.name }}</span>
-              <em>{{ stats.by_category[c.id] || 0 }}</em>
-            </div>
-          </div>
-        </div>
-
-        <div class="side-card">
-          <div class="side-h"><span>难度</span></div>
-          <div class="chip-row">
-            <span
-              class="chip"
-              :class="{ active: !filterDifficulty }"
-              @click="filterDifficulty = ''; resetAndLoad()"
-            >全部</span>
-            <span
-              v-for="(m, k) in DIFFICULTY_META"
-              :key="k"
-              class="chip"
-              :class="{ active: filterDifficulty === k }"
-              :style="filterDifficulty === k ? { background: m.color, borderColor: m.color } : {}"
-              @click="filterDifficulty = k as Difficulty; resetAndLoad()"
-            >{{ m.name }}</span>
-          </div>
-          <div class="fav-toggle">
-            <el-checkbox v-model="filterFavorite" @change="resetAndLoad">仅看收藏</el-checkbox>
-          </div>
-        </div>
-
-        <div v-if="allTags.length" class="side-card">
-          <div class="side-h"><span>标签</span></div>
-          <div class="chip-row">
-            <span
-              v-for="t in allTags"
-              :key="t"
-              class="chip"
-              :class="{ active: filterTag === t }"
-              @click="filterTag = filterTag === t ? '' : t; resetAndLoad()"
-            >{{ t }}</span>
-          </div>
-        </div>
-      </aside>
-
-      <section class="list-main">
-        <div class="list-toolbar">
-          <el-input
-            v-model="keyword"
-            placeholder="搜索题干或答案…"
-            :prefix-icon="Search"
-            clearable
-            @keyup.enter="resetAndLoad"
-            @clear="resetAndLoad"
-            style="flex: 1; max-width: 420px"
-          />
-          <el-button type="primary" :icon="Plus" @click="openNew">新增题目</el-button>
-          <el-button :icon="Upload" @click="openImport">导入</el-button>
-          <el-button :icon="Download" @click="exportVisible = true">导出</el-button>
-          <el-button type="warning" plain :icon="MagicStick" @click="aiVisible = true">AI 出题</el-button>
-          <el-button :type="batchMode ? 'primary' : 'default'" @click="toggleBatch">
-            {{ batchMode ? '退出批量' : '批量管理' }}
-          </el-button>
-          <el-button :icon="Refresh" @click="loadList" />
-        </div>
-
-        <!-- 批量操作条 -->
-        <div v-if="batchMode" class="batch-bar">
-          <span>已选 <strong>{{ selectedIds.size }}</strong> 题</span>
-          <el-button size="small" @click="selectPage">全选本页</el-button>
-          <el-button size="small" @click="selectedIds = new Set()">清空</el-button>
-          <el-input v-model="batchTag" size="small" placeholder="标签（逗号分隔，覆盖设置）" style="width: 220px" />
-          <el-button size="small" type="primary" @click="doBatchTag">应用标签</el-button>
-          <el-button size="small" type="danger" @click="doBatchDelete">批量删除</el-button>
-          <em class="batch-tip">点击题目卡片即可勾选</em>
-        </div>
-
-        <div v-loading="loading" class="q-list">
-          <div v-if="!questions.length && !loading" class="empty-state">
-            <el-icon :size="40"><Collection /></el-icon>
-            <p>暂无题目，点击「新增题目」或「导入」开始整理</p>
-          </div>
-          <div
-            v-for="q in questions"
-            :key="q.id"
-            class="q-card"
-            :class="{ 'batch-selected': batchMode && selectedIds.has(q.id) }"
-            @click="onCardClick(q)"
-          >
-            <div class="q-head">
-              <div class="q-tags">
-                <el-checkbox
-                  v-if="batchMode"
-                  :model-value="selectedIds.has(q.id)"
-                  @click.stop
-                  @change="onCardClick(q)"
-                />
-                <span class="tag-cat" :style="{ background: getCategoryMeta(q.category).color }">
-                  {{ getCategoryMeta(q.category).name }}
-                </span>
-                <span class="tag-diff" :style="{ color: DIFFICULTY_META[q.difficulty].color }">
-                  {{ DIFFICULTY_META[q.difficulty].name }}
-                </span>
-                <span v-for="t in q.tags" :key="t" class="tag">#{{ t }}</span>
-              </div>
-              <div class="q-actions" @click.stop>
-                <el-icon
-                  class="fav-icon"
-                  :class="{ active: q.favorite }"
-                  @click="toggleFavorite(q)"
-                ><Star /></el-icon>
-                <el-button link :icon="Edit" @click="openEdit(q)">编辑</el-button>
-                <el-button link type="danger" :icon="Delete" @click="removeQuestion(q)">删除</el-button>
-              </div>
-            </div>
-            <h3 class="q-title" @click.stop="batchMode ? onCardClick(q) : openEdit(q)">{{ q.title }}</h3>
-            <p class="q-answer">{{ q.answer.slice(0, 120) }}{{ q.answer.length > 120 ? '…' : '' }}</p>
-            <div class="q-foot">
-              <span v-if="q.source">来源：{{ q.source }}</span>
-              <span>{{ new Date(q.updatedAt).toLocaleDateString() }}</span>
-            </div>
-          </div>
-        </div>
-
-        <div v-if="total > pageSize" class="pagination">
-          <el-pagination
-            v-model:current-page="page"
-            :total="total"
-            :page-size="pageSize"
-            layout="prev, pager, next, total"
-            @current-change="loadList"
-          />
-        </div>
-      </section>
-    </div>
-
-    <!-- ============ 错题本模式 ============ -->
-    <RecordsView v-else-if="mode === 'records'" class="records-wrap" />
-
-    <!-- ============ 问答模式 ============ -->
-    <div v-else class="quiz-wrap">
-      <div v-if="!quizStarted" class="quiz-config">
-        <h3>配置出题范围</h3>
-        <div class="cfg-block">
-          <label>分类（至少选一个）</label>
-          <el-checkbox-group v-model="quizCategories">
-            <el-checkbox v-for="c in INTERVIEW_CATEGORIES" :key="c.id" :value="c.id">
-              {{ c.name }}
-            </el-checkbox>
-          </el-checkbox-group>
-        </div>
-        <div class="cfg-block">
-          <label>难度（不选=全部）</label>
-          <el-checkbox-group v-model="quizDifficulties">
-            <el-checkbox v-for="(m, k) in DIFFICULTY_META" :key="k" :value="k">{{ m.name }}</el-checkbox>
-          </el-checkbox-group>
-        </div>
-        <div class="cfg-block">
-          <label>题目数量</label>
-          <el-input-number v-model="quizCount" :min="1" :max="100" />
-        </div>
-        <el-button type="primary" size="large" @click="startQuiz">开始随机出题</el-button>
-      </div>
-
-      <div v-else class="quiz-stage">
-        <div class="quiz-progress">
-          <span>第 {{ quizIndex + 1 }} / {{ quizQuestions.length }} 题</span>
-          <el-progress :percentage="Math.round(((quizIndex + 1) / quizQuestions.length) * 100)" :stroke-width="6" />
-        </div>
-
-        <div v-if="currentQuiz" class="quiz-card">
-          <div class="quiz-meta">
-            <span class="tag-cat" :style="{ background: getCategoryMeta(currentQuiz.category).color }">
-              {{ getCategoryMeta(currentQuiz.category).name }}
-            </span>
-            <span class="tag-diff" :style="{ color: DIFFICULTY_META[currentQuiz.difficulty].color }">
-              {{ DIFFICULTY_META[currentQuiz.difficulty].name }}
-            </span>
-            <span v-for="t in currentQuiz.tags" :key="t" class="tag">#{{ t }}</span>
-          </div>
-          <h2 class="quiz-title">{{ currentQuiz.title }}</h2>
-          <el-input
-            v-model="quizAnswers[quizIndex]"
-            type="textarea"
-            :rows="6"
-            placeholder="在这里作答…（纯本地记录，不会上传）"
-          />
-          <div class="quiz-actions">
-            <el-button v-if="!quizRevealed[quizIndex]" type="primary" @click="revealAnswer">
-              查看参考答案
-            </el-button>
-            <template v-else>
-              <div class="answer-box">
-                <strong>参考答案：</strong>
-                <p>{{ currentQuiz.answer }}</p>
-              </div>
-              <div class="rate-row">
-                <span>自评：</span>
-                <el-button
-                  v-for="s in [0, 1, 2, 3]"
-                  :key="s"
-                  size="small"
-                  :type="quizScores[quizIndex] === s ? 'primary' : 'default'"
-                  @click="rate(s)"
-                >{{ ['不会', '一般', '掌握', '熟练'][s] }}</el-button>
-              </div>
-            </template>
-          </div>
-          <div class="quiz-nav">
-            <el-button :icon="ArrowLeft" :disabled="quizIndex === 0" @click="prevQuiz">上一题</el-button>
-            <el-button @click="exitQuiz">退出</el-button>
-            <el-button
-              type="primary"
-              :icon="ArrowRight"
-              :disabled="quizIndex === quizQuestions.length - 1"
-              @click="nextQuiz"
-            >下一题</el-button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ============ 编辑弹窗 ============ -->
-    <el-dialog v-model="editVisible" :title="isNew ? '新增题目' : '编辑题目'" width="720px" top="6vh">
-      <div v-if="editing" class="edit-form">
-        <div class="form-row">
-          <label>分类</label>
-          <el-select v-model="editing.category" style="width: 100%">
-            <el-option v-for="c in INTERVIEW_CATEGORIES" :key="c.id" :value="c.id" :label="c.name" />
-          </el-select>
-        </div>
-        <div class="form-row">
-          <label>标签（逗号分隔）</label>
-          <el-input
-            :model-value="editing.tags?.join(', ') || ''"
-            placeholder="Vue, 响应式"
-            @update:model-value="(v: string) => { if (editing) editing.tags = v.split(/[,，]/).map((s) => s.trim()).filter(Boolean) }"
-          />
-        </div>
-        <div class="form-row">
-          <label>难度</label>
-          <el-radio-group v-model="editing.difficulty">
-            <el-radio v-for="(m, k) in DIFFICULTY_META" :key="k" :value="k">{{ m.name }}</el-radio>
-          </el-radio-group>
-        </div>
-        <div class="form-row">
-          <label>题干 *</label>
-          <el-input v-model="editing.title" type="textarea" :rows="2" />
-        </div>
-        <div class="form-row">
-          <label>参考答案</label>
-          <el-input v-model="editing.answer" type="textarea" :rows="10" />
-        </div>
-        <div class="form-row">
-          <label>来源</label>
-          <el-input v-model="editing.source" placeholder="可选，如：字节跳动 / 牛客网" />
-        </div>
-      </div>
-      <template #footer>
-        <el-button @click="editVisible = false">取消</el-button>
-        <el-button type="primary" @click="saveEdit">{{ isNew ? '新增' : '保存' }}</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- ============ 导入弹窗 ============ -->
-    <el-dialog v-model="importVisible" title="导入题目" width="720px" top="6vh">
-      <p class="import-tip">
-        支持三种方式：<br />
-        · <strong>上传文件</strong>：.json / .txt / .md（UTF-8）<br />
-        · <strong>粘贴 JSON 数组</strong>：<code>[{ "title": "...", "answer": "...", "category": "frontend", "tags": ["Vue"], "difficulty": "easy" }]</code><br />
-        · <strong>粘贴文本</strong>：每题空行分隔，首行题干，"答：" 开头为答案，可标注 <code>分类：前端</code> <code>标签：Vue</code> <code>难度：简单</code>
-      </p>
-      <el-upload
-        drag
-        :auto-upload="false"
-        :show-file-list="true"
-        :limit="1"
-        accept=".json,.txt,.md"
-        :on-change="onFilePick"
-        :on-remove="() => (pickedFile = null)"
-        style="margin-bottom: 14px"
-      >
-        <el-icon :size="32"><Upload /></el-icon>
-        <div class="el-upload__text">拖拽文件到此处，或 <em>点击选择</em>（选了文件则忽略下方文本）</div>
-      </el-upload>
-      <el-input
-        v-model="importText"
-        type="textarea"
-        :rows="10"
-        placeholder='例如：&#10;Vue 的响应式原理是什么？&#10;答：Vue 通过 Object.defineProperty...&#10;分类：前端&#10;标签：Vue&#10;&#10;第二题...'
-      />
-      <template #footer>
-        <el-button @click="importVisible = false">取消</el-button>
-        <el-button type="primary" @click="doImport">导入</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- ============ 导出弹窗 ============ -->
-    <el-dialog v-model="exportVisible" title="导出题目" width="480px">
-      <p class="import-tip">
-        按当前筛选条件导出（分类 {{ filterCategory || '全部' }} / 难度 {{ filterDifficulty || '全部' }} / 关键词 {{ keyword || '无' }}）<br />
-        · <strong>JSON</strong>：结构化数据，可直接重新导入<br />
-        · <strong>文本</strong>：与粘贴导入格式互通，方便编辑分享
-      </p>
-      <template #footer>
-        <el-button @click="exportVisible = false">取消</el-button>
-        <el-button :icon="Download" @click="doExport('text')">导出 TXT</el-button>
-        <el-button type="primary" :icon="Download" @click="doExport('json')">导出 JSON</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- ============ AI 出题弹窗 ============ -->
-    <AiGenerateDialog v-model="aiVisible" @imported="onAiImported" />
-  </div>
-</template>
-
 <style scoped>
-.interview-page { min-height: 100vh; background: var(--c-bg); padding: 24px; box-sizing: border-box; }
-.page-hero { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
-.hero-left { display: flex; align-items: center; gap: 14px; }
-.hero-icon { font-size: 36px; color: var(--c-primary); }
-.hero-left h1 { margin: 0; font-size: 24px; }
-.hero-left p { margin: 4px 0 0; color: var(--c-text-mute); font-size: 13px; }
+.page-interview { max-width: 1280px; margin: 0 auto; }
 
-/* 题库布局 */
-.bank-layout { display: grid; grid-template-columns: 240px 1fr; gap: 18px; align-items: start; }
-.filter-side { position: sticky; top: 16px; }
-.side-card { background: var(--c-bg-soft); border: 1px solid var(--c-border); border-radius: 10px; padding: 14px; margin-bottom: 14px; }
-.side-h { display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 13px; margin-bottom: 10px; }
-.stat-row { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; }
-.stat-row strong { color: var(--c-primary); }
-.cat-list { display: flex; flex-direction: column; gap: 2px; }
-.cat-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; }
-.cat-item:hover { background: var(--c-hover); }
-.cat-item.active { background: var(--c-primary-soft); color: var(--c-primary); font-weight: 600; }
-.cat-item em { margin-left: auto; font-style: normal; color: var(--c-text-mute); font-size: 12px; }
-.cat-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-.chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
-.chip { padding: 4px 10px; border: 1px solid var(--c-border); border-radius: 12px; font-size: 12px; cursor: pointer; background: var(--c-bg); }
-.chip.active { color: #fff; }
-.fav-toggle { margin-top: 10px; }
+/* ---------- Hero ---------- */
+.hero {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 16px; flex-wrap: wrap; margin-bottom: 24px;
+}
+.hero-title { display: flex; align-items: center; gap: 10px; font-size: 26px; margin: 0; }
+.hero-sub { color: var(--c-text-mute); margin: 6px 0 0; }
+.hero-right { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 
-.list-main { min-width: 0; }
-.list-toolbar { display: flex; gap: 10px; margin-bottom: 16px; align-items: center; }
-.q-list { display: flex; flex-direction: column; gap: 12px; }
-.empty-state { text-align: center; padding: 60px 20px; color: var(--c-text-mute); }
-.q-card { background: var(--c-bg-soft); border: 1px solid var(--c-border); border-radius: 10px; padding: 16px 18px; transition: border-color .2s; }
-.q-card:hover { border-color: var(--c-primary); }
-.q-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; gap: 10px; }
-.q-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.tag-cat { color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+/* ---------- 布局 ---------- */
+.bank-layout { display: flex; gap: 20px; align-items: flex-start; }
+.side-panel {
+  width: 230px; flex-shrink: 0; display: flex; flex-direction: column; gap: 16px;
+  position: sticky; top: 76px;
+}
+.side-block { background: var(--c-bg-soft); border: 1px solid var(--c-border); border-radius: 10px; padding: 14px; }
+.side-title { margin: 0 0 10px; font-size: 13px; color: var(--c-text-mute); }
+.side-list { display: flex; flex-direction: column; gap: 2px; }
+.side-item {
+  display: flex; align-items: center; gap: 8px;
+  background: none; border: none; padding: 7px 8px; border-radius: 6px;
+  cursor: pointer; font-size: 13px; color: var(--c-text); text-align: left; width: 100%;
+}
+.side-item:hover { background: var(--c-hover); }
+.side-item.active { background: var(--c-primary-soft); color: var(--c-primary); font-weight: 600; }
+.dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.side-count { margin-left: auto; font-size: 12px; color: var(--c-text-mute); }
+
+/* ---------- 列表 ---------- */
+.list-main { min-width: 0; flex: 1; }
+.list-toolbar { display: flex; gap: 10px; margin-bottom: 16px; align-items: center; flex-wrap: wrap; }
+.batch-tip { font-style: normal; color: var(--c-text-mute); margin-left: auto; font-size: 12px; }
+.batch-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: var(--c-primary-soft); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px;
+}
+.q-table-wrap { background: var(--c-bg-soft); border-radius: 10px; overflow: hidden; }
+.q-table { width: 100%; }
+.cell-title { font-weight: 500; }
+.cell-muted { color: var(--c-text-mute); }
+.cell-tags { display: flex; flex-wrap: nowrap; gap: 4px; overflow: hidden; }
+.tag { color: var(--c-text-mute); font-size: 12px; flex-shrink: 0; }
+.tag-cat { color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 12px; display: inline-block; }
 .tag-diff { font-size: 12px; font-weight: 600; }
-.tag { color: var(--c-text-mute); font-size: 12px; }
-.q-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
-.fav-icon { font-size: 18px; cursor: pointer; color: var(--c-text-mute); }
+.cell-actions { display: flex; align-items: center; gap: 2px; justify-content: center; }
+.fav-icon { font-size: 18px; cursor: pointer; color: var(--c-text-mute); margin-right: 2px; }
 .fav-icon.active { color: #f59e0b; }
-.q-title { margin: 0 0 8px; font-size: 15px; cursor: pointer; }
-.q-answer { margin: 0; color: var(--c-text-mute); font-size: 13px; line-height: 1.6; }
-.q-foot { margin-top: 10px; display: flex; justify-content: space-between; font-size: 12px; color: var(--c-text-mute); }
+.empty-state { text-align: center; padding: 60px 20px; color: var(--c-text-mute); }
 .pagination { margin-top: 20px; display: flex; justify-content: center; }
 
-/* 问答模式 */
-.quiz-wrap { max-width: 820px; margin: 0 auto; }
-.quiz-config { background: var(--c-bg-soft); border: 1px solid var(--c-border); border-radius: 12px; padding: 30px; }
-.quiz-config h3 { margin: 0 0 20px; }
-.cfg-block { margin-bottom: 20px; }
-.cfg-block label { display: block; font-weight: 600; margin-bottom: 10px; font-size: 14px; }
-.quiz-progress { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; }
-.quiz-progress span { white-space: nowrap; font-size: 13px; }
-.quiz-card { background: var(--c-bg-soft); border: 1px solid var(--c-border); border-radius: 12px; padding: 28px; }
-.quiz-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; align-items: center; }
-.quiz-title { margin: 0 0 18px; font-size: 19px; line-height: 1.5; }
-.quiz-actions { margin-top: 16px; }
-.answer-box { margin-top: 16px; padding: 16px; background: var(--c-primary-soft); border-left: 3px solid var(--c-primary); border-radius: 6px; }
-.answer-box p { margin: 8px 0 0; white-space: pre-wrap; line-height: 1.7; }
-.rate-row { margin-top: 14px; display: flex; align-items: center; gap: 8px; }
-.quiz-nav { margin-top: 24px; display: flex; justify-content: space-between; }
+:deep(.q-table .el-table__row) { cursor: pointer; }
+:deep(.q-table .row-selected) { background-color: var(--c-primary-soft) !important; }
+:deep(.q-table .el-table__cell) { padding: 8px 0; }
 
-/* 编辑表单 */
-.edit-form { display: flex; flex-direction: column; gap: 16px; }
+/* ---------- 编辑表单 ---------- */
+.edit-form { display: flex; flex-direction: column; gap: 14px; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .form-row { display: flex; flex-direction: column; gap: 6px; }
-.form-row label { font-size: 13px; font-weight: 600; }
-.import-tip { background: var(--c-bg-soft); padding: 12px; border-radius: 6px; font-size: 13px; line-height: 1.8; margin: 0 0 14px; }
-.import-tip code { background: var(--c-bg); padding: 1px 6px; border-radius: 3px; }
+.form-row label { font-size: 13px; font-weight: 500; }
+.req { color: #ef4444; font-style: normal; }
 
-.batch-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; background: var(--c-primary-soft); border: 1px dashed var(--c-primary); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; font-size: 13px; }
-.batch-tip { font-style: normal; color: var(--c-text-mute); margin-left: auto; font-size: 12px; }
-.q-card.batch-selected { border-color: var(--c-primary); background: var(--c-primary-soft); }
-.records-wrap { max-width: 900px; margin: 0 auto; }
+/* ---------- 导入提示 ---------- */
+.import-tip {
+  background: var(--c-bg-soft); border-radius: 8px; padding: 10px 14px;
+  font-size: 12.5px; color: var(--c-text-mute); line-height: 1.8; margin: 0 0 12px;
+}
+.import-tip code { background: var(--c-code-bg, #eee); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
 
-@media (max-width: 768px) {
-  .bank-layout { grid-template-columns: 1fr; }
-  .filter-side { position: static; }
-  .interview-page { padding: 14px; }
+/* ---------- 刷题 ---------- */
+.quiz-layout { max-width: 860px; margin: 0 auto; }
+.quiz-config {
+  background: var(--c-bg-soft); border: 1px solid var(--c-border);
+  border-radius: 12px; padding: 24px; max-width: 480px; margin: 0 auto;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.quiz-config h3 { margin: 0; }
+.quiz-panel { display: flex; flex-direction: column; gap: 14px; }
+.quiz-head { display: flex; justify-content: space-between; align-items: center; }
+.quiz-progress { color: var(--c-text-mute); font-size: 14px; }
+.quiz-card {
+  background: var(--c-bg-soft); border: 1px solid var(--c-border);
+  border-radius: 12px; padding: 24px;
+}
+.quiz-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.quiz-title { margin: 0 0 6px; font-size: 20px; line-height: 1.5; }
+.quiz-answer { margin: 0; line-height: 1.8; white-space: pre-wrap; }
+.quiz-kp-title { font-weight: 600; margin: 14px 0 4px; color: var(--c-primary); }
+.quiz-kp {
+  margin: 0; line-height: 1.8; white-space: pre-wrap;
+  background: var(--c-primary-soft); border-radius: 8px; padding: 10px 14px;
+}
+
+/* ---------- 响应式 ---------- */
+@media (max-width: 900px) {
+  .bank-layout { flex-direction: column; }
+  .side-panel { width: 100%; position: static; flex-direction: row; flex-wrap: wrap; }
+  .side-block { flex: 1; min-width: 200px; }
 }
 </style>

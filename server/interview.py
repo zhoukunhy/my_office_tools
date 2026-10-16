@@ -165,6 +165,18 @@ def _seed_if_empty() -> None:
 _init_db()
 
 
+def _migrate_columns() -> None:
+    """轻量迁移：为旧库补充新增列（可重复执行）"""
+    with _get_conn() as conn:
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(questions)").fetchall()}
+        if "key_points" not in cols:
+            conn.execute("ALTER TABLE questions ADD COLUMN key_points TEXT NOT NULL DEFAULT ''")
+            conn.commit()
+
+
+_migrate_columns()
+
+
 def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     d = dict(row)
     try:
@@ -192,6 +204,7 @@ class QuestionCreate(BaseModel):
     tags: list[str] = Field(default_factory=list)
     title: str
     answer: str = ""
+    keyPoints: str = ""  # 面试核心要点
     difficulty: str = "medium"
     source: str = ""
     favorite: bool = False
@@ -202,6 +215,7 @@ class QuestionUpdate(BaseModel):
     tags: Optional[list[str]] = None
     title: Optional[str] = None
     answer: Optional[str] = None
+    keyPoints: Optional[str] = None
     difficulty: Optional[str] = None
     source: Optional[str] = None
     favorite: Optional[bool] = None
@@ -213,6 +227,8 @@ class ImportItem(BaseModel):
     title: Optional[str] = None
     question: Optional[str] = None
     answer: Optional[str] = None
+    key_points: Optional[str] = None
+    keyPoints: Optional[str] = None
     difficulty: Optional[str] = None
     source: Optional[str] = None
 
@@ -285,9 +301,9 @@ def create_question(payload: QuestionCreate):
     qid = str(uuid.uuid4())
     with _get_conn() as conn:
         conn.execute(
-            "INSERT INTO questions (id, category, tags, title, answer, difficulty, source, favorite, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO questions (id, category, tags, title, answer, key_points, difficulty, source, favorite, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (qid, payload.category, json.dumps(_normalize_tags(payload.tags), ensure_ascii=False),
-             payload.title.strip(), payload.answer, payload.difficulty, payload.source,
+             payload.title.strip(), payload.answer, payload.keyPoints, payload.difficulty, payload.source,
              1 if payload.favorite else 0, now, now)
         )
         conn.commit()
@@ -314,6 +330,8 @@ def update_question(qid: str, payload: QuestionUpdate):
             updates["title"] = payload.title.strip()
         if payload.answer is not None:
             updates["answer"] = payload.answer
+        if payload.keyPoints is not None:
+            updates["key_points"] = payload.keyPoints
         if payload.difficulty is not None:
             if payload.difficulty not in _VALID_DIFFICULTIES:
                 raise HTTPException(status_code=400, detail=f"非法难度：{payload.difficulty}")
@@ -355,11 +373,12 @@ def _insert_items(items: list[dict]) -> tuple[int, int]:
             category = _norm_category(item.get("category"))
             difficulty = _norm_difficulty(item.get("difficulty"))
             tags = _normalize_tags(item.get("tags"))
+            key_points = str(item.get("key_points") or item.get("keyPoints") or "")
             qid = str(uuid.uuid4())
             conn.execute(
-                "INSERT INTO questions (id, category, tags, title, answer, difficulty, source, favorite, created_at, updated_at) VALUES (?,?,?,?,?,?,?,0,?,?)",
+                "INSERT INTO questions (id, category, tags, title, answer, key_points, difficulty, source, favorite, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,0,?,?)",
                 (qid, category, json.dumps(tags, ensure_ascii=False), title,
-                 str(item.get("answer") or ""), difficulty, str(item.get("source") or ""), now, now)
+                 str(item.get("answer") or ""), key_points, difficulty, str(item.get("source") or ""), now, now)
             )
             inserted += 1
         conn.commit()
@@ -375,10 +394,11 @@ def _parse_text_questions(text: str) -> list[dict]:
         answer = ""
         category = ""
         difficulty = ""
+        key_points = ""
         tags: list[str] = []
         for line in block.splitlines():
             line = line.rstrip()
-            m = re.match(r"^(分类|category|类别|tag|标签|难度|difficulty)[:：]\s*(.+)$", line, re.IGNORECASE)
+            m = re.match(r"^(分类|category|类别|tag|标签|难度|difficulty|要点|核心要点|key_points)[:：]\s*(.+)$", line, re.IGNORECASE)
             if m:
                 key = m.group(1).lower()
                 val = m.group(2).strip()
@@ -386,6 +406,8 @@ def _parse_text_questions(text: str) -> list[dict]:
                     category = val
                 elif key in ("tag", "标签"):
                     tags += [t.strip() for t in re.split(r"[,，]", val) if t.strip()]
+                elif key in ("要点", "核心要点", "key_points"):
+                    key_points = val
                 else:
                     difficulty = val
                 continue
@@ -397,6 +419,8 @@ def _parse_text_questions(text: str) -> list[dict]:
                 answer += line + "\n"
         if title.strip():
             item: dict = {"title": title.strip(), "answer": answer.strip()}
+            if key_points:
+                item["key_points"] = key_points
             if category:
                 item["category"] = category
             if tags:
@@ -592,6 +616,8 @@ def export_questions(
             block = q["title"] + "\n"
             if q.get("answer"):
                 block += "答：" + q["answer"].replace("\n", "\n") + "\n"
+            if q.get("key_points"):
+                block += f"要点：{q['key_points']}\n"
             block += f"分类：{_CATEGORY_ZH.get(q['category'], q['category'])}\n"
             if q.get("tags"):
                 block += "标签：" + "、".join(q["tags"]) + "\n"
@@ -602,8 +628,8 @@ def export_questions(
         media = "text/plain; charset=utf-8"
     else:
         export_list = [
-            {"title": q["title"], "answer": q["answer"], "category": q["category"],
-             "tags": q["tags"], "difficulty": q["difficulty"], "source": q.get("source") or ""}
+            {"title": q["title"], "answer": q["answer"], "key_points": q.get("key_points") or "",
+             "category": q["category"], "tags": q["tags"], "difficulty": q["difficulty"], "source": q.get("source") or ""}
             for q in items
         ]
         content = json.dumps(export_list, ensure_ascii=False, indent=2)
@@ -612,6 +638,106 @@ def export_questions(
     return Response(
         content=content,
         media_type=media,
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{urllib.parse.quote(fname)}"},
+    )
+
+
+@router.get("/export-excel")
+def export_excel(
+    category: Optional[str] = None,
+    difficulty: Optional[str] = None,
+    keyword: Optional[str] = None,
+):
+    """专用 Excel 导出接口：按筛选条件生成 .xlsx，答案与核心要点完整展示（自动换行）。"""
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    except ImportError:
+        raise HTTPException(status_code=503, detail="后端缺少依赖 openpyxl，请先 pip install openpyxl")
+
+    clauses: list[str] = []
+    params: list[Any] = []
+    if category and category in _VALID_CATEGORIES:
+        clauses.append("category = ?")
+        params.append(category)
+    if difficulty and difficulty in _VALID_DIFFICULTIES:
+        clauses.append("difficulty = ?")
+        params.append(difficulty)
+    if keyword:
+        clauses.append("(title LIKE ? OR answer LIKE ?)")
+        params.extend([f"%{keyword}%", f"%{keyword}%"])
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    with _get_conn() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM questions {where} ORDER BY category, updated_at DESC", params
+        ).fetchall()
+    items = [_row_to_dict(r) for r in rows]
+
+    wb = Workbook()
+    wb.remove(wb.active)
+
+    headers = ["分类", "难度", "题干", "答案", "核心要点", "标签", "来源"]
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="4F6EFF", end_color="4F6EFF", fill_type="solid")
+    thin = Side(style="thin", color="CCCCCC")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    wrap = Alignment(wrap_text=True, vertical="top")
+    header_align = Alignment(horizontal="center", vertical="center")
+
+    def _write_sheet(ws, cat_items: list[dict[str, Any]]) -> None:
+        for col, h in enumerate(headers, 1):
+            c = ws.cell(row=1, column=col, value=h)
+            c.font = header_font
+            c.fill = header_fill
+            c.alignment = header_align
+            c.border = border
+        for row_idx, q in enumerate(cat_items, 2):
+            values = [
+                _CATEGORY_ZH.get(q["category"], q["category"]),
+                _DIFFICULTY_ZH.get(q["difficulty"], q["difficulty"]),
+                q.get("title", ""),
+                q.get("answer", ""),
+                q.get("key_points") or "",
+                "、".join(q.get("tags", [])),
+                q.get("source") or "",
+            ]
+            for col, v in enumerate(values, 1):
+                cell = ws.cell(row=row_idx, column=col, value=v)
+                cell.alignment = wrap
+                cell.border = border
+        widths = {"A": 12, "B": 8, "C": 36, "D": 60, "E": 30, "F": 18, "G": 14}
+        for col, w in widths.items():
+            ws.column_dimensions[col].width = w
+        ws.freeze_panes = "A2"
+
+    # 按分类分组，每个分类一个 sheet
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for q in items:
+        groups.setdefault(q["category"], []).append(q)
+
+    # 按固定分类顺序生成 sheet，未知分类追加到最后
+    ordered_cats = [c for c in _CATEGORY_ZH if c in groups] + [
+        c for c in groups if c not in _CATEGORY_ZH
+    ]
+    for cat in ordered_cats:
+        ws = wb.create_sheet(title=_CATEGORY_ZH.get(cat, cat)[:31])
+        _write_sheet(ws, groups[cat])
+
+    if not wb.sheetnames:  # 无数据时兜底，避免空工作簿保存失败
+        _write_sheet(wb.create_sheet(title="面试题库"), [])
+    wb.active = 0
+
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    fname = f"interview_bank_{stamp}.xlsx"
+
+    import io
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{urllib.parse.quote(fname)}"},
     )
 

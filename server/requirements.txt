@@ -2,6 +2,8 @@ fastapi>=0.111
 uvicorn[standard]>=0.30
 python-multipart>=0.0.9
 python-dotenv>=1.0
+# Excel 导出（面试题库）
+openpyxl>=3.1
 # AI 生成 PPT（langgraph 编排 + OpenAI 兼容 LLM）
 langgraph>=0.2
 langchain-openai>=0.2
